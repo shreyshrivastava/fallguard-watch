@@ -5,8 +5,8 @@ Data
 - WEDA-FALL (Fitbit Sense, wrist): training and cross-person evaluation.
   Fall timing comes from the dataset's fall_timestamps.csv.
 - Your watch recordings (tools/pull_recordings.sh): not-fall training data,
-  except the longest "Normal day" session, which is held out to measure
-  false alarms per hour.
+  including the longest "Normal day" (what normal looks like for you),
+  except the shortest "Normal day", held out to measure false alarms per hour.
 - UMAFall wrist: outside test only. Its sensor clips at 250 deg/s and 8 g,
   so it is too distorted to train on.
 
@@ -147,7 +147,9 @@ def load_own():
     """Your watch sessions. All are not-fall. Returns (train, held_out)."""
     files = sorted(glob.glob(f"{OWN}/session_*.csv"))
     normal = [f for f in files if f.endswith("_normal-day.csv")]
-    held_out = max(normal, key=os.path.getsize) if normal else None
+    # The longest day trains the model on what normal looks like for this wearer;
+    # the shortest is held out so false alarms are still measured on unseen data.
+    held_out = min(normal, key=os.path.getsize) if len(normal) > 1 else None
     train, test = [], None
     for f in files:
         df = pd.read_csv(f, comment="#")
@@ -162,6 +164,8 @@ def load_own():
         step = STEP_OWN_TEST if f == held_out else STEP_OWN_TRAIN
         X, t = windows(x, step)
         rec = dict(source="own", subject="own", kind=os.path.basename(f), X=X, y=np.ones(len(X), int), t=t)
+        if f != held_out:
+            rec["pool"] = windows(x, STEP_PUBLIC)[0]   # denser windows to search for hard negatives
         if f == held_out:
             test = rec
         else:
@@ -178,7 +182,8 @@ def stack(recs):
 def train(X, y, epochs=15):
     model = HARNet(n_classes=2)
     counts = np.bincount(y, minlength=2).astype(np.float32)
-    weights = torch.tensor(counts.sum() / (2 * np.maximum(counts, 1)))
+    # Square-root balancing: full balancing (~10x for falls) made the model alarm too eagerly.
+    weights = torch.tensor(np.sqrt(counts.sum() / (2 * np.maximum(counts, 1))))
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     Xt, yt = torch.from_numpy(X), torch.from_numpy(y)
@@ -196,6 +201,20 @@ def train(X, y, epochs=15):
         print(f"    epoch {ep + 1:2d}/{epochs}  loss {total / len(Xt):.4f}", flush=True)
     model.eval()
     return model
+
+
+def train_with_hard_negatives(recs, own_pool, rounds_copies=3, th=0.5):
+    """Train, then add the own-data windows the model wrongly flags as falls
+    (from a denser pool of the same training sessions) and train again."""
+    X, y = stack(recs)
+    model = train(X, y)
+    hard = own_pool[p_fall(model, own_pool) >= th]
+    print(f"    hard negatives found: {len(hard)} of {len(own_pool)} own windows", flush=True)
+    if len(hard) == 0:
+        return model
+    X = np.concatenate([X] + [hard] * rounds_copies)
+    y = np.concatenate([y, np.ones(len(hard) * rounds_copies, int)])
+    return train(X, y)
 
 
 @torch.no_grad()
@@ -249,26 +268,26 @@ def main():
     weda = load_weda()
     own_train, own_test = load_own()
     uma = load_umafall()
-    assert own_test is not None, "need at least one Normal day recording to hold out"
+    assert own_test is not None, "need two Normal day recordings: one to train on, one to hold out"
     n = lambda rs: sum(len(r["y"]) for r in rs)
     print(f"Loaded in {time.time() - t0:.0f}s: WEDA {len(weda)} recordings / {n(weda)} windows "
           f"({sum(int((r['y'] == 0).sum()) for r in weda)} fall windows), "
           f"own train {n(own_train)} windows, own held-out {len(own_test['y'])} windows, "
           f"UMAFall {len(uma)} recordings")
 
+    own_pool = np.concatenate([r["pool"] for r in own_train])
+
     # A. Cross-person check on WEDA: 5 folds, each person is only ever in one fold.
     subjects = np.array([r["subject"] for r in weda])
     report = {"folds": []}
     for k, (tr, te) in enumerate(GroupKFold(n_splits=5).split(weda, groups=subjects)):
         print(f"Fold {k + 1}/5: testing on {len(set(subjects[te]))} unseen people")
-        X, y = stack([weda[i] for i in tr] + own_train)
-        model = train(X, y)
+        model = train_with_hard_negatives([weda[i] for i in tr] + own_train, own_pool)
         report["folds"].append({str(th): event_metrics(model, [weda[i] for i in te], th) for th in THRESHOLDS})
 
     # B/C. Final model on all WEDA + own training data.
     print("Final model")
-    X, y = stack(weda + own_train)
-    model = train(X, y)
+    model = train_with_hard_negatives(weda + own_train, own_pool)
     report["umafall_outside_test"] = {str(th): event_metrics(model, uma, th) for th in THRESHOLDS}
     report["own_held_out_normal_day"] = {str(th): alarms_per_hour(model, own_test, th) for th in THRESHOLDS}
     report["held_out_file"] = own_test["kind"]
