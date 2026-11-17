@@ -79,6 +79,41 @@ def windows(x, step):
     return np.stack([x[s:s + WIN] for s in starts]) if len(starts) else np.empty((0, WIN, 6), np.float32), starts / HZ
 
 
+# ── Stream readers: one file in, a 50 Hz (n, 6) array out (or None) ────────────
+
+def read_weda_stream(accel_file):
+    gf = accel_file.replace("_accel.csv", "_gyro.csv")
+    if not os.path.exists(gf):
+        return None
+    a = pd.read_csv(accel_file, encoding="utf-8-sig").to_numpy(float)
+    g = pd.read_csv(gf, encoding="utf-8-sig").to_numpy(float)
+    return resample(a[:, 0], a[:, 1:4], g[:, 0], g[:, 1:4])[1]
+
+
+def read_uma_stream(path):
+    rows = {0: [], 1: []}
+    for line in open(path, errors="ignore"):
+        if line.startswith("%") or not line.strip():
+            continue
+        p = line.strip().split(";")
+        if len(p) >= 7 and p[6].strip() == "3" and p[5].strip() in ("0", "1"):   # sensor 3 = wrist
+            rows[int(p[5])].append([float(p[0]) / 1000, float(p[2]), float(p[3]), float(p[4])])
+    if len(rows[0]) < 20 or len(rows[1]) < 20:
+        return None
+    a, g = np.array(rows[0]), np.array(rows[1])
+    return resample(a[:, 0], a[:, 1:] * 9.80665, g[:, 0], np.deg2rad(g[:, 1:]))[1]
+
+
+def read_own_stream(path):
+    df = pd.read_csv(path, comment="#")
+    a = df[df.sensor == "A"].to_numpy()
+    g = df[df.sensor == "G"].to_numpy()
+    if len(a) < WIN or len(g) < WIN:
+        return None
+    return resample(a[:, 1].astype(float) / 1e9, a[:, 2:5].astype(float),
+                    g[:, 1].astype(float) / 1e9, g[:, 2:5].astype(float))[1]
+
+
 # ── Loaders: each returns a list of recordings ────────────────────────────────
 # recording = dict(source, subject, kind, X (n,100,6), y (n,), t (window starts s))
 
@@ -90,12 +125,7 @@ def load_weda():
     recs = []
     for af in sorted(glob.glob(f"{WEDA}/*/U*_R*_accel.csv")):
         key = os.path.relpath(af, WEDA)[: -len("_accel.csv")]
-        gf = af.replace("_accel.csv", "_gyro.csv")
-        if not os.path.exists(gf):
-            continue
-        a = pd.read_csv(af, encoding="utf-8-sig").to_numpy(float)
-        g = pd.read_csv(gf, encoding="utf-8-sig").to_numpy(float)
-        _, x = resample(a[:, 0], a[:, 1:4], g[:, 0], g[:, 1:4])
+        x = read_weda_stream(af)
         if x is None:
             continue
         X, t = windows(x, STEP_PUBLIC)
@@ -117,17 +147,7 @@ def load_weda():
 def load_umafall():
     recs = []
     for f in sorted(glob.glob(f"{UMA}/*.csv")):
-        rows = {0: [], 1: []}
-        for line in open(f, errors="ignore"):
-            if line.startswith("%") or not line.strip():
-                continue
-            p = line.strip().split(";")
-            if len(p) >= 7 and p[6].strip() == "3" and p[5].strip() in ("0", "1"):
-                rows[int(p[5])].append([float(p[0]) / 1000, float(p[2]), float(p[3]), float(p[4])])
-        if len(rows[0]) < 20 or len(rows[1]) < 20:
-            continue
-        a, g = np.array(rows[0]), np.array(rows[1])
-        _, x = resample(a[:, 0], a[:, 1:] * 9.80665, g[:, 0], np.deg2rad(g[:, 1:]))
+        x = read_uma_stream(f)
         if x is None:
             continue
         X, t = windows(x, STEP_PUBLIC)
@@ -152,13 +172,7 @@ def load_own():
     held_out = min(normal, key=os.path.getsize) if len(normal) > 1 else None
     train, test = [], None
     for f in files:
-        df = pd.read_csv(f, comment="#")
-        a = df[df.sensor == "A"].to_numpy()
-        g = df[df.sensor == "G"].to_numpy()
-        if len(a) < WIN or len(g) < WIN:
-            continue
-        _, x = resample(a[:, 1].astype(float) / 1e9, a[:, 2:5].astype(float),
-                        g[:, 1].astype(float) / 1e9, g[:, 2:5].astype(float))
+        x = read_own_stream(f)
         if x is None:
             continue
         step = STEP_OWN_TEST if f == held_out else STEP_OWN_TRAIN
