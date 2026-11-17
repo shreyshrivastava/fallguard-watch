@@ -69,76 +69,86 @@ def unit(v):
     return v / m if m > 0.001 else np.array([0.0, 1.0, 0.0])
 
 
-def run(x, ends, probs, preset, conf_override=None):
-    """Return the times (s) of confirmed alarms in one stream."""
-    spike, freefall, req_dip, conf, min_tilt, still_needed = PRESETS[preset]
-    if conf_override is not None:
-        conf = conf_override
+def steps(x, ends, probs):
+    """Everything the detector sees at each inference step. Depends only on the
+    data (cadence comes from the stationary shortcut), so compute it once."""
     idx_of_end = {e: i for i, e in enumerate(ends)}
-    phase, entered, still, pre = "IDLE", 0.0, 0, np.array([0.0, 9.8, 0.0])
-    stationary_run, alarms, mute_until = 0, [], -1.0
-    end = WIN
+    rows, stationary_run, end = [], 0, WIN
     while end <= len(x):
-        now = end / HZ
         w = x[end - WIN:end]
-        if is_stationary(w):
-            stationary_run += 1
-        else:
-            stationary_run = 0
+        stationary_run = stationary_run + 1 if is_stationary(w) else 0
         if stationary_run > 2:
             az, ay = w[-1, 2], w[-1, 1]
-            label = "lying" if abs(az) > 7 else "standing" if abs(ay) > 6 else "sitting"
+            gravity_label = "lying" if abs(az) > 7 else "standing" if abs(ay) > 6 else "sitting"
             p_fall, step = 0.0, REST_STEP
         else:
-            p_fall = probs[idx_of_end[end]]
-            label = LABELS[0] if p_fall >= 0.5 else LABELS[1]
-            step = NORMAL_STEP
+            gravity_label, p_fall, step = None, probs[idx_of_end[end]], NORMAL_STEP
+        mag = np.linalg.norm(w[:, :3], axis=1)
+        rows.append((end / HZ, p_fall, gravity_label, mag.max(), mag.min(), mag.std(),
+                     np.linalg.norm(w[:, 3:], axis=1).max(), unit(w[:, :3].mean(0))))
         end += step
+    return rows
+
+
+def preset_params(preset, conf_override=None):
+    spike, freefall, req_dip, conf, min_tilt, still_needed = PRESETS[preset]
+    return dict(spike=spike, freefall=freefall, req_dip=req_dip,
+                conf=conf if conf_override is None else conf_override,
+                min_tilt=min_tilt, still_needed=still_needed, gyr=GYR_SPIKE, still_std=STILL_STD,
+                post_timeout=POST_FALL_TIMEOUT, lying_from_gravity=True)
+
+
+def machine(rows, P):
+    """FallDetector.onInferenceResult over precomputed steps; returns alarm times (s)."""
+    phase, entered, still, pre = "IDLE", 0.0, 0, np.array([0.0, 9.8, 0.0])
+    alarms, mute_until = [], -1.0
+    for now, p_fall, g_label, acc_peak, acc_min, acc_std, gyr_peak, orient in rows:
         if now < mute_until:
             continue
-
-        mag = np.linalg.norm(w[:, :3], axis=1)
-        acc_peak, acc_min, acc_std = mag.max(), mag.min(), mag.std()
-        gyr_peak = np.linalg.norm(w[:, 3:], axis=1).max()
-        orient = unit(w[:, :3].mean(0))
-        fall_pred = label == "falling" or p_fall >= conf
-        lying = label == "lying"          # no probs[1] shortcut, see module docstring
+        label = g_label or (LABELS[0] if p_fall >= 0.5 else LABELS[1])
+        fall_pred = label == "falling" or p_fall >= P["conf"]
+        lying = P["lying_from_gravity"] and label == "lying"   # no probs[1] shortcut, see docstring
         active = label in ("walking", "running")
-        ff = acc_min < freefall
+        ff = acc_min < P["freefall"]
         timed_out = lambda limit: entered > 0 and now - entered > limit
-
         if phase == "IDLE":
             if not fall_pred and acc_std < 2.0:
                 pre = orient
-            started = (ff and acc_peak >= spike * 0.75) if req_dip else (acc_peak > spike or (ff and gyr_peak > 1.2))
+            spike = P["spike"]
+            started = (ff and acc_peak >= spike * 0.75) if P["req_dip"] else (acc_peak > spike or (ff and gyr_peak > 1.2))
             if started:
                 phase, entered, still = "P1", now, 0
         elif phase == "P1":
             if timed_out(PHASE_TIMEOUT):
                 phase, entered = "IDLE", 0.0
-            elif gyr_peak > GYR_SPIKE:
+            elif gyr_peak > P["gyr"]:
                 phase, entered, still = "P2", now, 0
-            elif acc_peak > spike:
+            elif acc_peak > P["spike"]:
                 entered = now
         elif phase == "P2":
             if timed_out(PHASE_TIMEOUT):
                 phase, entered = "IDLE", 0.0
-            elif fall_pred and acc_peak > spike * 0.75:
+            elif fall_pred and acc_peak > P["spike"] * 0.75:
                 phase, entered, still = "P3", now, 0
         elif phase == "P3":
-            if timed_out(POST_FALL_TIMEOUT) or (active and acc_std > 2.0):
+            if timed_out(P["post_timeout"]) or (active and acc_std > 2.0):
                 phase, entered = "IDLE", 0.0
                 continue
             tilt = np.degrees(np.arccos(np.clip(np.dot(unit(pre), orient), -1, 1)))
-            if lying or (acc_std < STILL_STD and tilt >= min_tilt):
+            if lying or (acc_std < P["still_std"] and tilt >= P["min_tilt"]):
                 still += 1
-                if still >= still_needed:
+                if still >= P["still_needed"]:
                     alarms.append(now)
                     phase, entered, still = "IDLE", 0.0, 0
                     mute_until = now + ALERT_HOLD_S
             elif acc_std > 2.0:
                 still = 0
     return alarms
+
+
+def run(x, ends, probs, preset, conf_override=None):
+    """Return the times (s) of confirmed alarms in one stream."""
+    return machine(steps(x, ends, probs), preset_params(preset, conf_override))
 
 
 def self_check():
