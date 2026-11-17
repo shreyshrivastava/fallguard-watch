@@ -146,6 +146,28 @@ def machine(rows, P):
     return alarms
 
 
+# Step 2 of the two-step alert: after a detected fall the watch asks "Are you OK?";
+# it only auto-calls if the wearer then stays near-still. Commercial watches wait
+# about a minute. shortcut: values chosen from one wearer's data; recall impact is
+# untested because WEDA recordings end ~5 s after each fall.
+IMMOBILE_S = 60          # seconds watched after the alarm
+IMMOBILE_BLOCK_STD = 0.5  # m/s², std of |a| within a 1 s block counted as still
+IMMOBILE_FRACTION = 0.8   # share of 1 s blocks that must be still
+
+
+def auto_calls(x, alarm_times):
+    """Alarms followed by IMMOBILE_S of near-stillness, i.e. those that would auto-call."""
+    mag = np.linalg.norm(x[:, :3], axis=1)
+    out = []
+    for t in alarm_times:
+        a = int(t * HZ)
+        blocks = [mag[a + i * HZ:a + (i + 1) * HZ] for i in range(IMMOBILE_S)]
+        blocks = [b for b in blocks if len(b) == HZ]
+        if len(blocks) == IMMOBILE_S and np.mean([b.std() < IMMOBILE_BLOCK_STD for b in blocks]) >= IMMOBILE_FRACTION:
+            out.append(t)
+    return out
+
+
 def run(x, ends, probs, preset, conf_override=None):
     """Return the times (s) of confirmed alarms in one stream."""
     return machine(steps(x, ends, probs), preset_params(preset, conf_override))
@@ -164,7 +186,13 @@ def self_check():
         np.tile([9.8, 0, 0, 0, 0, 0], (300, 1)),       # lying still, tilted 90 deg
     ]).astype(np.float32)
     e = np.arange(WIN, len(fall) + 1, TICK)
-    assert len(run(fall, e, np.ones(len(e)), "balanced")) == 1, "scripted fall must alarm once"
+    alarms = run(fall, e, np.ones(len(e)), "balanced")
+    assert len(alarms) == 1, "scripted fall must alarm once"
+    still_after = np.concatenate([fall, np.tile(fall[-1], (IMMOBILE_S * HZ, 1))])
+    assert auto_calls(still_after, alarms) == alarms, "60 s of stillness after a fall must auto-call"
+    moving = still_after.copy()
+    moving[len(fall):, 0] += np.sin(np.arange(IMMOBILE_S * HZ) / 3) * 3
+    assert auto_calls(moving, alarms) == [], "moving after the alarm must not auto-call"
 
 
 def main():

@@ -28,7 +28,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
 from models.neural_net import HARNet  # noqa: E402
-from simulate_detector import machine, model_probs, preset_params, steps  # noqa: E402
+from simulate_detector import auto_calls, machine, model_probs, preset_params, steps  # noqa: E402
 from train_wrist import HZ, OUT, OWN, UMA, WEDA, read_own_stream, read_uma_stream, read_weda_stream  # noqa: E402
 
 MIN_RECALL = 0.90
@@ -47,22 +47,22 @@ GRID = dict(
 )
 
 
-def prep(files, reader, model):
+def prep(files, reader, model, keep_stream=False):
     out = []
     for f in files:
         x = reader(f)
         if x is not None:
             e, p = model_probs(model, x)
-            out.append((f, steps(x, e, p), len(x) / HZ / 3600))
+            out.append((f, steps(x, e, p), len(x) / HZ / 3600, x if keep_stream else None))
     return out
 
 
 def recall(data, P):
-    return sum(bool(machine(r, P)) for _, r, _ in data) / max(len(data), 1)
+    return sum(bool(machine(r, P)) for _, r, _, _ in data) / max(len(data), 1)
 
 
 def per_day(day, P):
-    _, rows, hours = day
+    _, rows, hours, _ = day
     return len(machine(rows, P)) / hours * 16
 
 
@@ -99,13 +99,16 @@ def main():
     best = ok[0]
 
     # Final check, once, on data never used for choosing.
-    held = prep([os.path.join(OWN, held_name)], read_own_stream, model)[0]
+    held = prep([os.path.join(OWN, held_name)], read_own_stream, model, keep_stream=True)[0]
     uma = prep(sorted(glob.glob(f"{UMA}/*.csv")), read_uma_stream, model)
     uma_f = [u for u in uma if "_Fall_" in u[0]]
     uma_a = [u for u in uma if "_Fall_" not in u[0]]
 
     def final(P):
+        calls = auto_calls(held[3], machine(held[1], P))
         return dict(held_out_alarms_per_day=round(per_day(held, P), 1),
+                    held_out_auto_calls=len(calls),
+                    held_out_auto_calls_per_day=round(len(calls) / held[2] * 16, 1),
                     held_out_alarms=len(machine(held[1], P)), held_out_hours=round(held[2], 2),
                     umafall_fall_recall=round(recall(uma_f, P), 3),
                     umafall_activity_false_alarm=round(recall(uma_a, P), 3))
@@ -123,7 +126,8 @@ def main():
         fin = t["final"]
         print(f"{name:22} tuning: {t['tune_recall']:.1%} falls, {t['tune_alarms_per_day']:.1f} alarms/day | "
               f"held-out day: {fin['held_out_alarms']} alarms in {fin['held_out_hours']} h "
-              f"({fin['held_out_alarms_per_day']}/day) | UMAFall: {fin['umafall_fall_recall']:.1%} falls, "
+              f"({fin['held_out_alarms_per_day']}/day), auto-calls {fin['held_out_auto_calls']} "
+              f"({fin['held_out_auto_calls_per_day']}/day) | UMAFall: {fin['umafall_fall_recall']:.1%} falls, "
               f"{fin['umafall_activity_false_alarm']:.1%} activity false alarms")
     print(f"\n{len(ok)} of {len(tried)} settings reached {MIN_RECALL:.0%} recall on the tuning falls")
     line("App default (desk_safe)", report["current_app_default"])
