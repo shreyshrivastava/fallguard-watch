@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -61,11 +62,14 @@ import kotlinx.coroutines.launch
 /** Scrolling screen with the clock on top and room for an edge button at the bottom. */
 @Composable
 fun ListScreen(edge: (@Composable androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null, content: ScalingLazyListScope.() -> Unit) {
-    val state = rememberScalingLazyListState()
+    val state = rememberScalingLazyListState(initialCenterItemIndex = 0)
     Scaffold(timeText = { TimeText() }, positionIndicator = { PositionIndicator(scalingLazyListState = state) }) {
         Box(Modifier.fillMaxSize().background(FG.Bg)) {
             ScalingLazyColumn(
                 modifier = Modifier.fillMaxSize(), state = state,
+                // Start below the clock instead of centring the second item, which pushed the first one under it.
+                autoCentering = null,
+                contentPadding = PaddingValues(top = 30.dp, start = 10.dp, end = 10.dp, bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -284,8 +288,8 @@ fun SettingsScreen(phoneConnected: Boolean?, alarmSound: Boolean, onAlarmSound: 
     ListScreen {
         item { ScreenTitle(null, "Settings") }
         item {
-            ListCard(R.drawable.ic_smartphone, "Phone", "Sends texts and calls for help", trailing = {
-                Text(when (phoneConnected) { true -> "Connected"; false -> "Not connected"; null -> "Checking…" },
+            ListCard(R.drawable.ic_smartphone, "Phone", "Texts and calls for help", trailing = {
+                Text(when (phoneConnected) { true -> "Connected"; false -> "Offline"; null -> "Checking" },
                     fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (phoneConnected == true) FG.Emerald else FG.Amber)
             })
         }
