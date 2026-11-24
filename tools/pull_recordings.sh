@@ -6,7 +6,10 @@ set -euo pipefail
 ADB="${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}"
 SERIAL="${1:-}"
 DEST="${2:-recordings}"
-SRC="/sdcard/Android/data/com.example.activitycollector/files/recordings"
+# APP: the watch app's ID. Set APP=com.example.activitycollector to pull from the
+# older build that used the original app's ID.
+APP="${APP:-com.shreyshrivastava.fallguard}"
+SRC="/sdcard/Android/data/$APP/files/recordings"
 args=()
 [ -n "$SERIAL" ] && args=(-s "$SERIAL")
 mkdir -p "$DEST"

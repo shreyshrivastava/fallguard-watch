@@ -8,6 +8,8 @@ import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.telecom.TelecomManager
 import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -109,16 +111,16 @@ object EmergencyDispatcher {
         ) == PackageManager.PERMISSION_GRANTED
 
         try {
-            val callIntent = if (hasCallPermission) {
-                Intent(Intent.ACTION_CALL, Uri.parse("tel:${primary.phone}")).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
+            if (hasCallPermission) {
+                // TelecomManager.placeCall works from a background service; starting the
+                // call activity directly is blocked by Android 10+ when the app isn't visible.
+                context.getSystemService(TelecomManager::class.java)
+                    .placeCall(Uri.parse("tel:${primary.phone}"), Bundle())
             } else {
-                Intent(Intent.ACTION_DIAL, Uri.parse("tel:${primary.phone}")).apply {
+                context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${primary.phone}")).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
+                })
             }
-            context.startActivity(callIntent)
             callPlaced = true
             Log.i(TAG, "Emergency call initiated to primary contact: ${primary.name} (${primary.phone})")
         } catch (e: Exception) {
@@ -134,6 +136,25 @@ object EmergencyDispatcher {
             locationFound = location != null,
             summary = summary
         )
+    }
+
+    /** Texts every contact that the wearer is OK, after an SOS. Returns how many texts were sent. */
+    fun sendSafeMessage(context: Context): Int {
+        val contacts = EmergencyContactManager(context).getContacts()
+        if (contacts.isEmpty() || ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
+            != PackageManager.PERMISSION_GRANTED) return 0
+        val sms: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(SmsManager::class.java)
+        } else {
+            @Suppress("DEPRECATION") SmsManager.getDefault()
+        }
+        val body = "FallGuard update: I'm OK. Please ignore the earlier emergency alert."
+        var sent = 0
+        for (c in contacts) {
+            try { sms.sendTextMessage(c.phone, null, body, null, null); sent++ }
+            catch (e: Exception) { Log.e(TAG, "Failed sending safe message to ${c.name}: ${e.message}") }
+        }
+        return sent
     }
 
     private fun getLastKnownLocation(context: Context): Location? {

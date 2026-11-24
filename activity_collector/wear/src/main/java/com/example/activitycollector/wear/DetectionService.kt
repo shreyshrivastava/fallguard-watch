@@ -23,6 +23,8 @@ import android.os.Vibrator
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.example.activitycollector.AlertEvent
+import com.example.activitycollector.AlertHistoryManager
 import com.example.activitycollector.FallDetector
 import com.example.activitycollector.InferenceEngine
 import com.example.activitycollector.SensorBuffer
@@ -68,6 +70,7 @@ class DetectionService : Service(), SensorEventListener {
         const val ACTION_START = "com.example.activitycollector.wear.DETECTION_START"
         const val ACTION_STOP = "com.example.activitycollector.wear.DETECTION_STOP"
         const val ACTION_IM_OK = "com.example.activitycollector.wear.IM_OK"
+        const val ACTION_CALL_HELP = "com.example.activitycollector.wear.CALL_HELP"
 
         // Same caps as training (har_pipeline/train_wrist.py): WEDA's Fitbit saturates at 4 g.
         const val ACC_CAP = 4f * 9.80665f
@@ -89,6 +92,9 @@ class DetectionService : Service(), SensorEventListener {
 
         fun imOk(context: Context) = context.startService(
             Intent(context, DetectionService::class.java).setAction(ACTION_IM_OK))
+
+        fun callHelpNow(context: Context) = context.startService(
+            Intent(context, DetectionService::class.java).setAction(ACTION_CALL_HELP))
     }
 
     private lateinit var sensorManager: SensorManager
@@ -113,6 +119,7 @@ class DetectionService : Service(), SensorEventListener {
         when (intent?.action) {
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
             ACTION_IM_OK -> { finishAlert("dismissed_by_tap"); return START_NOT_STICKY }
+            ACTION_CALL_HELP -> { finishAlert("call_help_now"); return START_NOT_STICKY }
         }
         if (_state.value.running) return START_NOT_STICKY
 
@@ -224,9 +231,23 @@ class DetectionService : Service(), SensorEventListener {
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ALERT)
         val secondsToOutcome = (SystemClock.elapsedRealtime() - _state.value.alertStartedAtElapsedMs) / 1000.0
         saveAlert(outcome, secondsToOutcome, stillFraction)
+        recordHistory(outcome)
+        if (outcome == "would_auto_call" || outcome == "call_help_now") SosController.start(this, "fall")
         detector.dismissFall()
         _state.value = _state.value.copy(alertActive = false)
         Log.i(TAG, "Alert finished: $outcome")
+    }
+
+    /** The watch's History screen; an SOS adds its own entry when the phone replies. */
+    private fun recordHistory(outcome: String) {
+        val event = when (outcome) {
+            "dismissed_by_tap" -> AlertEvent(outcome = AlertEvent.Outcome.DISMISSED_SAFE, summary = "Tapped I'm OK")
+            "moved_no_call" -> AlertEvent(outcome = AlertEvent.Outcome.CANCELLED_EARLY, summary = "You kept moving, no call made")
+            else -> return
+        }
+        AlertHistoryManager(this).recordAlert(event.copy(
+            impactForce = detector.lastFallImpactPeak, confidencePct = detector.lastFallConfidencePct,
+        ))
     }
 
     private fun saveAlert(outcome: String, secondsToOutcome: Double, stillFraction: Float?) {

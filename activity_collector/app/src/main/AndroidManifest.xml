@@ -82,5 +82,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- Receives the watch's SOS and "I'm OK" over the Wearable Data Layer. -->
+        <service
+            android:name=".WatchRelayService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/fallguard" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

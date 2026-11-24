@@ -8,7 +8,7 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.activitycollector"
+        applicationId "com.shreyshrivastava.fallguard"
         minSdk 26
         targetSdk 34
         versionCode 1
@@ -53,4 +53,7 @@ dependencies {
 
     // Shared detector, model runner, contacts and history (includes PyTorch Mobile).
     implementation project(':core')
+
+    // Wearable Data Layer: receive the watch's SOS, sync contact names to the watch.
+    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
 }
