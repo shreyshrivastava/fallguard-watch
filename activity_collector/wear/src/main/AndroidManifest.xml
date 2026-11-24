@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Phase 4 fall detection: vibrate and show the "Are you OK?" prompt. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:allowBackup="true"
@@ -39,6 +42,14 @@
              computer: see tools/record_remote.sh. -->
         <service
             android:name=".RecordingService"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:foregroundServiceType="health" />
+
+        <!-- Same DUMP-only export as RecordingService, so detection can be started,
+             stopped and dismissed over adb (am start-foreground-service -a ...). -->
+        <service
+            android:name=".DetectionService"
             android:exported="true"
             android:permission="android.permission.DUMP"
             android:foregroundServiceType="health" />
