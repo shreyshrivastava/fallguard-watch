@@ -60,3 +60,7 @@ datasets/
 
 # Trained on WEDA-FALL (no data license): keep the weights local
 har_pipeline/outputs/wrist/*.pt
+
+# Wrist model for the watch, trained on WEDA-FALL (no data license): keep local
+activity_collector/wear/src/main/assets/wrist_model.ptl
+har_pipeline/outputs/wrist/*.ptl

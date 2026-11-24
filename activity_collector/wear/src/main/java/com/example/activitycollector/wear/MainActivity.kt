@@ -74,9 +74,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
+        // The "Are you OK?" prompt opens this activity over the lock screen.
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+
         setContent {
             var screen by remember { mutableStateOf(Screen.Live) }
             val recording by RecordingService.stats.collectAsState()
+            val detection by DetectionService.state.collectAsState()
+            if (detection.alertActive) {
+                AlertScreen(startedAtElapsedMs = detection.alertStartedAtElapsedMs, onOk = { DetectionService.imOk(this) })
+                return@setContent
+            }
             BackHandler(enabled = screen == Screen.Recorder) { screen = Screen.Live }
             if (screen == Screen.Recorder || recording != null) {
                 RecorderScreen(
@@ -88,6 +97,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 return@setContent
             }
             LiveSensorScreen(
+                detection = detection,
+                onToggleDetection = {
+                    if (detection.running) DetectionService.stop(this)
+                    else { ensureNotificationPermission(); DetectionService.start(this) }
+                },
                 onOpenRecorder = { screen = Screen.Recorder },
                 hasAccelerometer = accelerometer != null,
                 hasGyroscope = gyroscope != null,
@@ -101,13 +115,17 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     private fun startRecording(label: String) {
+        ensureNotificationPermission()
+        RecordingService.start(this, label)
+    }
+
+    /** Notifications show that recording/detection is running and carry the fall prompt. */
+    private fun ensureNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            // The recording notification is how Wear OS shows the session is running.
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        RecordingService.start(this, label)
     }
 
     override fun onResume() {
@@ -168,6 +186,8 @@ private val Muted = Color(0xFF97A9A1)
 
 @Composable
 private fun LiveSensorScreen(
+    detection: DetectionService.State,
+    onToggleDetection: () -> Unit,
     onOpenRecorder: () -> Unit,
     hasAccelerometer: Boolean,
     hasGyroscope: Boolean,
@@ -190,6 +210,23 @@ private fun LiveSensorScreen(
             ) {
                 item {
                     Text("FallGuard", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Mint)
+                }
+                item {
+                    Chip(
+                        onClick = onToggleDetection,
+                        label = { Text(if (detection.running) "Stop fall detection" else "Start fall detection") },
+                        colors = if (detection.running) ChipDefaults.secondaryChipColors()
+                        else ChipDefaults.primaryChipColors(backgroundColor = Mint, contentColor = Color.Black),
+                    )
+                }
+                if (detection.running) {
+                    item {
+                        val p = detection.lastFallProbability
+                        Text(
+                            "On • fall model ${p?.let { "%.0f%%".format(it * 100) } ?: "—"} • prompts ${detection.promptsThisSession}",
+                            fontSize = 12.sp, color = Muted, textAlign = TextAlign.Center,
+                        )
+                    }
                 }
                 item {
                     Text("Live sensors", fontSize = 12.sp, color = Muted)
@@ -257,3 +294,30 @@ private fun SensorBlock(title: String, available: Boolean, values: FloatArray?, 
 private fun magnitude(v: FloatArray): Float = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 
 private fun fmt(v: Float): String = "%.2f".format(v)
+
+
+/** Step 1 of the two-step alert. Step 2 (auto-call after 60 s still) is decided by DetectionService. */
+@Composable
+private fun AlertScreen(startedAtElapsedMs: Long, onOk: () -> Unit) {
+    var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    androidx.compose.runtime.LaunchedEffect(startedAtElapsedMs) {
+        while (true) { now = SystemClock.elapsedRealtime(); kotlinx.coroutines.delay(1000L) }
+    }
+    val left = (DetectionService.IMMOBILE_S - (now - startedAtElapsedMs) / 1000).coerceAtLeast(0)
+    MaterialTheme {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Are you OK?", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Color(0xFFF87171))
+            Text("A possible fall was detected", fontSize = 13.sp, textAlign = TextAlign.Center)
+            Chip(
+                onClick = onOk,
+                label = { Text("I'm OK", fontSize = 16.sp) },
+                colors = ChipDefaults.primaryChipColors(backgroundColor = Mint, contentColor = Color.Black),
+            )
+            Text("Checking for movement: ${left}s", fontSize = 12.sp, color = Muted)
+        }
+    }
+}

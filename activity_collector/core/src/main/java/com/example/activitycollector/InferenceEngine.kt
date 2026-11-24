@@ -45,6 +45,8 @@ class InferenceEngine(
     private val buffer: SensorBuffer,
     private val windowSize: Int = 100,
     private val inferenceIntervalMs: Long = 400L,
+    private val modelAsset: String = MODEL_ASSET,
+    private val labelsAsset: String = LABELS_ASSET,
     private val onResult: (label: String, confidence: Float, probs: FloatArray) -> Unit,
 ) {
 
@@ -231,8 +233,8 @@ class InferenceEngine(
      */
     private fun loadModel(): Module? {
         return try {
-            val modelFile = File(context.cacheDir, MODEL_ASSET)
-            context.assets.open(MODEL_ASSET).use { input ->
+            val modelFile = File(context.cacheDir, modelAsset)
+            context.assets.open(modelAsset).use { input ->
                 FileOutputStream(modelFile).use { output -> input.copyTo(output) }
             }
             Log.i(TAG, "Model synced to cache: ${modelFile.absolutePath} (${modelFile.length()} bytes)")
@@ -247,7 +249,7 @@ class InferenceEngine(
 
     private fun loadLabels(): List<String> {
         return try {
-            context.assets.open(LABELS_ASSET)
+            context.assets.open(labelsAsset)
                 .bufferedReader()
                 .readLines()
                 .map { it.trim() }

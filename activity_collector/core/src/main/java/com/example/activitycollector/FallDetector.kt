@@ -64,6 +64,10 @@ class FallDetector(
     var minTiltChangeDeg: Float = MIN_TILT_CHANGE_DEG
     var fallModelConfThresh: Float = FALL_MODEL_CONF_THRESH
     var requiredStillWindows: Int = 3
+    /** Treat the gravity-based "lying" label as lying down (off on a wrist: watch face up is not lying). */
+    var lyingFromGravityLabel: Boolean = true
+    /** Treat model output 1 as "lying" (only true for the 6-class phone model). */
+    var lyingFromSecondOutput: Boolean = true
 
     private var phaseEnteredAt = 0L
     private var confirmedWindows = 0
@@ -94,7 +98,27 @@ class FallDetector(
         customFreefall: Boolean = true,
         customStillSec: Float = 1.5f
     ) {
+        // Defaults every preset starts from, so switching presets never keeps stale values.
+        lyingFromGravityLabel = true
+        lyingFromSecondOutput = true
+        gyrSpikeThreshold = GYR_SPIKE_THRESHOLD
+        stillnessStdThreshold = STILLNESS_STD_THRESHOLD
         when (preset) {
+            "wrist" -> {
+                // Tuned on wrist data by har_pipeline/tune_detector.py (2-class wrist model,
+                // acceleration capped at 4 g). The wrist keeps moving after a fall, so the
+                // stillness and tilt checks are effectively off.
+                svmSpikeThreshold = 38.0f
+                svmFreefallThreshold = 5.5f
+                requireFreefallDip = false
+                gyrSpikeThreshold = 4.0f
+                fallModelConfThresh = 0.97f
+                stillnessStdThreshold = 2.0f
+                minTiltChangeDeg = 0.0f
+                requiredStillWindows = 2
+                lyingFromGravityLabel = false
+                lyingFromSecondOutput = false
+            }
             "desk_safe" -> {
                 // Calibrated to IGNORE desk placement / bed toss
                 // Placing phone down on desk produces ~12-18 m/s² spike with ZERO freefall dip
@@ -156,7 +180,8 @@ class FallDetector(
         // Class index 0 is 'falling', class index 1 is 'lying'
         val fallProb = if (probs.isNotEmpty()) probs[0] else 0f
         val isFallPredicted = label.equals("falling", ignoreCase = true) || fallProb >= fallModelConfThresh
-        val isLyingPredicted = label.equals("lying", ignoreCase = true) || (probs.size > 1 && probs[1] >= 0.40f)
+        val isLyingPredicted = (lyingFromGravityLabel && label.equals("lying", ignoreCase = true)) ||
+            (lyingFromSecondOutput && probs.size > 1 && probs[1] >= 0.40f)
         val isActiveMotion = label.equals("walking", ignoreCase = true) || label.equals("running", ignoreCase = true)
 
         val freefallDetected = accMin < svmFreefallThreshold
