@@ -13,7 +13,7 @@ Fall detection for Wear OS. The watch notices a hard fall, asks if you're OK, an
 
 This is a fork of [kushagr-tech/fall_detection](https://github.com/kushagr-tech/fall_detection), a phone app that detects falls from a phone in your pocket. This fork moves detection to the wrist and keeps the phone app as the part that sends help. The original phone app's documentation is in [docs/phone-app.md](docs/phone-app.md).
 
-> FallGuard is a prototype. It is not a medical device, it has been tested on one wearer with simulated falls, and it should not replace a certified alert service for someone at risk.
+> This is version 1. It works end to end on a real watch and phone, and more improvements are planned (see [What's next](#whats-next)). FallGuard is a prototype. It is not a medical device, it has been tested on one wearer with simulated falls, and it should not replace a certified alert service for someone at risk.
 
 | Watching | Possible fall | Phone out of reach | Hold for SOS |
 |:---:|:---:|:---:|:---:|
@@ -180,6 +180,16 @@ Each file holds every raw accelerometer and gyroscope event with its hardware ti
 - Only the Standard sensitivity is tuned; More sensitive and Fewer prompts are shown but disabled.
 - The phone-unreachable alarm, "I'm OK, tell them", and the fresh GPS fix have not been tested on real devices yet.
 - The design's watch tile is not built.
+
+## What's next
+
+Version 1 proves the chain from a fall on the wrist to a text and a call from the phone. The next versions focus on making it reliable enough to wear every day:
+
+- Fewer false alarms, by training on more days of normal wear and retuning the detector against them.
+- Testing the paths that haven't run on real devices yet: the phone-unreachable alarm, "I'm OK, tell them", and the fresh GPS fix.
+- Moving the model from PyTorch Mobile to LiteRT or ExecuTorch, which should also shrink the watch app.
+- Tuning the More sensitive and Fewer prompts settings, and pausing detection when the watch is off the wrist.
+- The watch tile from the design, and measuring battery use over a full day of detection.
 
 ## Credits
 
