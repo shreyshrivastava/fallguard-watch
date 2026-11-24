@@ -2,9 +2,14 @@
 
 Fall detection for Wear OS. The watch notices a hard fall, asks if you're OK, and if you don't answer, your phone texts your emergency contacts a Google Maps link and calls the first one.
 
-![FallGuard Watch demo: a fall is detected, the watch asks "Are you OK?", the phone texts a Google Maps link and calls for help, and the watch sounds an alarm if the phone can't be reached](docs/media/fallguard-watch-demo.gif)
+<p align="center">
+  <img src="docs/media/fallguard-watch-demo.gif" width="720" alt="FallGuard Watch demo: a fall is detected, the watch asks Are you OK?, the phone texts a Google Maps link and calls for help, and the watch sounds an alarm if the phone can't be reached">
+</p>
 
-[Watch the demo with sound (MP4)](docs/media/fallguard-watch-demo.mp4). The screens in the video are the real app running in the Wear OS emulator; the fall is simulated with emulator sensor data.
+<p align="center">
+  <a href="docs/media/fallguard-watch-demo.mp4">Watch the demo with sound (MP4)</a><br>
+  The screens are the real app running in the Wear OS emulator. The fall is simulated with emulator sensor data.
+</p>
 
 This is a fork of [kushagr-tech/fall_detection](https://github.com/kushagr-tech/fall_detection), a phone app that detects falls from a phone in your pocket. This fork moves detection to the wrist and keeps the phone app as the part that sends help. The original phone app's documentation is in [docs/phone-app.md](docs/phone-app.md).
 
