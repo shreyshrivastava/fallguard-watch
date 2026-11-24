@@ -54,6 +54,7 @@ object SosController {
     fun start(context: Context, reason: String) {
         if (_state.value is State.Contacting || _state.value is State.Notified) return
         val app = context.applicationContext
+        Log.w(TAG, "SOS started ($reason)")
         attempts = 0
         _state.value = State.Contacting(SystemClock.elapsedRealtime())
         worker.post { attempt(app, reason) }
@@ -64,6 +65,7 @@ object SosController {
         attempts++
         val sent = try {
             val nodes = Tasks.await(Wearable.getNodeClient(app).connectedNodes, 5, TimeUnit.SECONDS)
+            Log.i(TAG, "Attempt $attempts: ${nodes.size} connected node(s)")
             nodes.count { node ->
                 runCatching {
                     Tasks.await(Wearable.getMessageClient(app).sendMessage(node.id, WatchProtocol.PATH_SOS, reason.toByteArray()), 5, TimeUnit.SECONDS)
@@ -73,6 +75,7 @@ object SosController {
             Log.w(TAG, "No phone reachable: ${e.message}")
             0
         }
+        Log.i(TAG, "SOS sent to $sent node(s)")
         if (sent > 0) {
             // Wait for the phone's reply; WearMessageService calls onPhoneResult.
             worker.postDelayed({ if (_state.value is State.Contacting) markUnreachable(app, reason) }, REPLY_TIMEOUT_MS)
@@ -89,6 +92,7 @@ object SosController {
 
     /** Called with the phone's JSON reply (WatchProtocol.sosResultJson). */
     fun onPhoneResult(app: Context, json: String) {
+        Log.i(TAG, "Phone replied to SOS")
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         val names = o.optJSONArray("texted_names")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList()
         stopAlarm()

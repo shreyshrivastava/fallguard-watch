@@ -9,6 +9,11 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Looper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import android.telecom.TelecomManager
 import android.telephony.SmsManager
 import android.util.Log
@@ -56,13 +61,10 @@ object EmergencyDispatcher {
             )
         }
 
-        // 1. Fetch current or last known location
-        val location = getLastKnownLocation(context)
-        val locationStr = if (location != null) {
-            "https://maps.google.com/?q=${location.latitude},${location.longitude}"
-        } else {
-            "Location unavailable"
-        }
+        // 1. Fresh GPS fix if one arrives in time, else the last known position.
+        val fresh = getFreshLocation(context)
+        val location = fresh ?: getLastKnownLocation(context)
+        val locationStr = if (location != null) mapsLink(location, isFresh = fresh != null) else "Location unavailable"
 
         val timeStr = SimpleDateFormat("HH:mm:ss dd-MMM", Locale.getDefault()).format(Date())
         val smsBody = "EMERGENCY SOS: Fall detected by FallGuard! User did not respond to check-in. Time: $timeStr. Location: $locationStr. Please call or assist immediately!"
@@ -156,6 +158,42 @@ object EmergencyDispatcher {
         }
         return sent
     }
+
+    /** Google Maps link with accuracy and when the position was measured. */
+    private fun mapsLink(loc: Location, isFresh: Boolean): String {
+        val at = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(loc.time))
+        val accuracy = if (loc.hasAccuracy()) " ±${loc.accuracy.toInt()} m" else ""
+        val age = if (isFresh) "now" else "last known, $at"
+        return "https://www.google.com/maps/search/?api=1&query=" +
+            String.format(Locale.US, "%.6f,%.6f", loc.latitude, loc.longitude) + " ($age$accuracy)"
+    }
+
+    /**
+     * Asks for a new GPS fix (falling back to network) and waits up to [FRESH_FIX_TIMEOUT_S].
+     * Returns null on the main thread, where waiting would freeze the app.
+     */
+    private fun getFreshLocation(context: Context): Location? {
+        if (Looper.myLooper() == Looper.getMainLooper() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+            if (!lm.isProviderEnabled(provider)) continue
+            val latch = CountDownLatch(1)
+            var result: Location? = null
+            val cancel = CancellationSignal()
+            try {
+                lm.getCurrentLocation(provider, cancel, Executors.newSingleThreadExecutor()) { result = it; latch.countDown() }
+                if (!latch.await(FRESH_FIX_TIMEOUT_S, TimeUnit.SECONDS)) cancel.cancel()
+            } catch (e: SecurityException) {
+                Log.w(TAG, "No location permission for $provider: ${e.message}")
+            }
+            if (result != null) return result
+        }
+        return null
+    }
+
+    private const val FRESH_FIX_TIMEOUT_S = 10L
 
     private fun getLastKnownLocation(context: Context): Location? {
         val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
