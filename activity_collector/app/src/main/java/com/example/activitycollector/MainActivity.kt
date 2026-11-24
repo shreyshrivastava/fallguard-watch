@@ -344,6 +344,8 @@ class MainActivity : AppCompatActivity(), FallMonitoringService.ServiceListener 
     }
 
     private fun updateQuickContactCard() {
+        // Called after every contact change, so the watch always shows the current names.
+        WatchRelayService.pushContactsToWatch(this)
         val primary = contactManager.getPrimaryContact()
         val allContacts = contactManager.getContacts()
         if (primary != null) {
@@ -900,7 +902,7 @@ class MainActivity : AppCompatActivity(), FallMonitoringService.ServiceListener 
         monitoringService?.startMonitoring()
         monitoringService?.startRecording("standing", 50)
         updateUiMonitoringState(true)
-        showToast("FallGaurd AI protection active.")
+        showToast("FallGuard protection active.")
     }
 
     private fun handleStopMonitoring() {

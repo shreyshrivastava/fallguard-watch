@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">FallGaurd</string>
+    <string name="app_name">FallGuard Companion</string>
     <string name="subtitle">Smart fall detection + 24/7 guardian</string>
 
     <!-- ── Inference display ─────────────────────────────────────────────── -->

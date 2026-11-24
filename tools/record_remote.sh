@@ -5,7 +5,7 @@
 #        tools/record_remote.sh stop [serial]
 set -euo pipefail
 ADB="${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}"
-CMP="com.example.activitycollector/com.example.activitycollector.wear.RecordingService"
+CMP="${APP:-com.shreyshrivastava.fallguard}/com.example.activitycollector.wear.RecordingService"
 case "${1:-}" in
   start) args=(); [ -n "${3:-}" ] && args=(-s "$3")
          "$ADB" "${args[@]}" shell am start-foreground-service -n "$CMP" --es label "'${2:?label required}'" ;;

@@ -53,5 +53,18 @@
             android:exported="true"
             android:permission="android.permission.DUMP"
             android:foregroundServiceType="health" />
+        <!-- Phone's SOS result and synced contact names (Wearable Data Layer). -->
+        <service
+            android:name=".WearMessageService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/fallguard" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/fallguard" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

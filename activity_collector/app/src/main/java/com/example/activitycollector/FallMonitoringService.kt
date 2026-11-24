@@ -566,6 +566,11 @@ class FallMonitoringService : Service(), SensorEventListener {
         uiHandler.removeCallbacks(countdownRunnable)
         stopAlertFeedback()
 
+        // Off the main thread: dispatch waits up to 10 s for a fresh GPS fix.
+        Thread({ dispatchAndRecord(fromFallAlert) }, "sos-dispatch").start()
+    }
+
+    private fun dispatchAndRecord(fromFallAlert: Boolean) {
         val result = EmergencyDispatcher.dispatchEmergency(this)
 
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
